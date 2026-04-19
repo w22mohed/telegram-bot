@@ -9,23 +9,28 @@ api_hash = "bc7184284bc452b668c8233864e79a2b"
 bot_token = "8208733782:AAFs9pBhcCn9DRxRACoxqBexmzqE7QGMkGw"
 chat_id = "6573315006"
 
+
 client = TelegramClient("session", api_id, api_hash)
 
 DATA_FILE = "data.json"
 
-if os.path.exists(DATA_FILE):
+try:
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
-else:
-    data = {"links": [], "codes": []}
+except:
+    data = {"items": []}
 
-seen_links = set(data["links"])
-seen_codes = set(data["codes"])
+seen = set([item["value"] for item in data["items"]])
 
 keywords = [
     "red packet", "ظرف", "binance",
     "thanks", "thank you", "شكرا",
     "fast", "ff", "fff", "ffff"
+]
+
+# قنوات ممنوعة
+blacklist = [
+    "ads", "spam"
 ]
 
 link_pattern = r'https?://\S+'
@@ -40,46 +45,60 @@ def send_to_bot(message):
 
 def save_data():
     with open(DATA_FILE, "w") as f:
-        json.dump({"links": list(seen_links), "codes": list(seen_codes)}, f)
+        json.dump({"items": list(data["items"])}, f)
 
 @client.on(events.NewMessage)
 async def handler(event):
-    try:
-        text = event.raw_text.lower()
 
-        if not any(k in text for k in keywords):
-            return
+    # ❌ تجاهل الخاص
+    if not event.is_group and not event.is_channel:
+        return
 
-        links = re.findall(link_pattern, text)
-        new_links = [l for l in links if l not in seen_links]
+    text = event.raw_text.lower()
 
-        codes = re.findall(code_pattern, text)
+    # 🚫 فلترة قنوات غير مهمة
+    chat_title = (event.chat.title or "").lower() if event.chat else ""
+    if any(b in chat_title for b in blacklist):
+        return
 
-        clean_codes = []
-        for c in codes:
-            cleaned = remove_emoji(c)
-            if cleaned not in seen_codes:
-                seen_codes.add(cleaned)
-                clean_codes.append(cleaned)
+    if not any(k in text for k in keywords):
+        return
 
-        if not new_links and not clean_codes:
-            return
+    source_name = event.chat.title if event.chat else "Unknown"
+    source_id = event.chat_id
+    source_link = f"https://t.me/c/{str(source_id)[4:]}" if str(source_id).startswith("-100") else "Private"
 
-        msg = ""
+    links = re.findall(link_pattern, text)
+    codes = re.findall(code_pattern, text)
 
-        for l in new_links:
-            seen_links.add(l)
-            msg += f"🔗 {l}\n"
+    msg = f"📡 Source: {source_name}\n🔗 Link: {source_link}\n\n"
 
-        for c in clean_codes:
-            msg += f"🔑 {c}\n"
+    for l in links:
+        cleaned = l
+        if cleaned not in seen:
+            seen.add(cleaned)
+            data["items"].append({
+                "type": "link",
+                "value": cleaned,
+                "source": source_name
+            })
+            msg += f"🔗 {cleaned}\n"
 
-        if msg:
-            send_to_bot(msg)
-            save_data()
+    for c in codes:
+        cleaned = remove_emoji(c)
+        if cleaned not in seen:
+            seen.add(cleaned)
+            data["items"].append({
+                "type": "code",
+                "value": cleaned,
+                "source": source_name
+            })
+            msg += f"🔑 {cleaned}\n"
 
-    except Exception as e:
-        print("Error:", e)
+    if "🔗" in msg or "🔑" in msg:
+        send_to_bot(msg)
+        save_data()
 
 client.start()
+print("Bot running...")
 client.run_until_disconnected()
